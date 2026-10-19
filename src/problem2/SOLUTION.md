@@ -17,7 +17,7 @@ To mitigate the impact of high disk usage, I would take the following immediate 
 
 - ** Check Disk Usage:** Use command `df -h` to check the current disk usage and identify which partitions are critically full. Very likely `/` or `/var` will be the most affected partitions.
 
-- ** Investigate Large Files:** After identifying the partitions that are critically full, use commands like `sudo du -sh / | sort -rh | head -20` or `sudo du -sh /var/log/* | sort -rh | head -20` to locate largest files and directories.
+- ** Investigate Large Files:** After identifying the partitions that are critically full, use commands like `sudo du -sh /var/log/` or `sudo du -sh /var/log/nginx/* | sort -rh | head -5` to locate largest files and directories.
 
 - ** Remove Unnecessary Files:** Once large files and directories are identified, remove unnecessary files using commands like`sudo truncate -s 0 /var/log/large-log-file.log` to free up disk space.
 
