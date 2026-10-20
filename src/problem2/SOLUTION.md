@@ -51,7 +51,8 @@ Nginx might be configured to cache content from upstream to disk, it can consume
 Setup monitoring on disk usage using crontab or monitoring tools like nagios or prometheus. Send alerts or email when usage exceeds threadholds. I would also monitor for the zombie files that are still held open by processes.
 
 ## 3.2 Log Rotation
-Configure logrotate tool to rotate log files based on both day and size to ensure that sudden spike of traffic does not fill up the disk space. I would also configure it to run hourly instead of daily.
-
+Configure logrotate tool to rotate log files based on both day and size to ensure that sudden spike of traffic does not fill up the disk space. I would also configure it to run hourly instead of daily. 
+Ideally, I would follow some best practices from online resources.
+Reference: https://www.digitalocean.com/community/tutorials/how-to-configure-logging-and-log-rotation-in-nginx-on-an-ubuntu-vps
 ## 3.3 Nginx Cache Management
 Setup crontab to cleanup the cache directory regularly, for example weekly.
