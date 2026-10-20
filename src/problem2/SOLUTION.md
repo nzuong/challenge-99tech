@@ -46,3 +46,12 @@ Nginx might be configured to cache content from upstream to disk, it can consume
 ** Restart Services if Necessary:** If reloading NGINX is not sufficient, consider restarting the service using `sudo systemctl restart nginx` to ensure all changes take effect and the service operates correctly. It may disrupt ongoing connections temporarily.
 
 ### 3. Long-term Mitigation Strategies
+
+## 3.1 Regular Disk Usage Monitoring
+Setup monitoring on disk usage using crontab or monitoring tools like nagios or prometheus. Send alerts or email when usage exceeds threadholds. I would also monitor for the zombie files that are still held open by processes.
+
+## 3.2 Log Rotation
+Configure logrotate tool to rotate log files based on both day and size to ensure that sudden spike of traffic does not fill up the disk space. I would also configure it to run hourly instead of daily.
+
+## 3.3 Nginx Cache Management
+Setup crontab to cleanup the cache directory regularly, for example weekly.
