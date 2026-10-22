@@ -1,0 +1,135 @@
+name: CI/CD - Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # Gate 1: Frontend Quality & SonarQube Scan
+  test-and-sonarqube:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout code with full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Component/Unit Tests with LCOV Coverage
+        run: npm test -- --watchAll=false --coverage --coverageReporters="lcov"
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: frontend
+          args: >
+            -Dsonar.projectKey=frontend
+            -Dsonar.projectName="Frontend"
+            -Dsonar.sources=src
+            -Dsonar.tests=src
+            -Dsonar.test.inclusions="**/*.test.tsx,**/*.test.ts,**/*.spec.tsx,**/*.spec.ts"
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+      - name: Enforce SonarQube Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+  # Stage 2: Docker Build -> ECR Push -> S3 Sync -> Invalidate Cache
+  build-and-sync:
+    needs: test-and-sonarqube
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: http://${{ vars.FRONTEND_S3_BUCKET }}.s3-website.${{ vars.AWS_REGION }}.amazonaws.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-frontend-deploy
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Frontend Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ vars.FRONTEND_ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ vars.FRONTEND_ECR_REPOSITORY }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract static files from Docker image
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ vars.FRONTEND_ECR_REPOSITORY }}:${{ github.sha }}"
+          CONTAINER_ID=$(docker create "$IMAGE_URI")
+          mkdir -p ./static-dist
+          docker cp "$CONTAINER_ID":/usr/share/nginx/html/. ./static-dist/
+          docker rm "$CONTAINER_ID"
+
+      - name: Sync static assets to S3
+        run: |
+          aws s3 sync ./static-dist/ s3://${{ vars.FRONTEND_S3_BUCKET }}/ \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
+
+          aws s3 cp ./static-dist/index.html s3://${{ vars.FRONTEND_S3_BUCKET }}/index.html \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      # If cache is enabled, we need to invalidate or purge it
+      # - name: Purge cache
+
+      - name: Test Deployment URL
+        run: |
+          echo "Testing deployment URL..."
+          curl -I http://${{ vars.FRONTEND_S3_BUCKET }}.s3-website.${{ vars.AWS_REGION }}.amazonaws.com
+          if [ $? -ne 0 ]; then
+            echo "Deployment test failed."
+            exit 1
+          fi
