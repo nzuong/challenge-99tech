@@ -1,0 +1,19 @@
+# This Dockerfile is used to build and package the frontend static assets for deployment on S3.
+# This demonstrates an idea how an image can be used to build and extract static assets for S3 deployment.
+# Not production-ready or syntax-complete, just for demonstration purposes.
+# Stage 1: Build static assets
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+
+RUN npm ci
+COPY /src ./src
+COPY .env . # since we build a static site, we need .env at build time
+RUN npm run build
+RUN npm export # Export the static files to the dist directory
+
+# Stage 2: Packaging layer (holds assets at /usr/share/nginx/html for extraction or standalone serving)
+FROM nginx:alpine-slim
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
